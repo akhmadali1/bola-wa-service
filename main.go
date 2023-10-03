@@ -57,16 +57,16 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		// err := godotenv.Load()
-		// if err != nil {
-		// 	log.Fatal(err)
-		// 	fmt.Println(err)
-		// 	return
-		// }
-		router := routes.SetupRoutes(client)
-
-		router.Run(":8073")
 	}
+	// err := godotenv.Load()
+	// if err != nil {
+	// 	log.Fatal(err)
+	// 	fmt.Println(err)
+	// 	return
+	// }
+	router := routes.SetupRoutes(client)
+
+	router.Run(":8073")
 
 	// Listen to Ctrl+C (you can also do something else that prevents the program from exiting)
 	c := make(chan os.Signal)
