@@ -1,4 +1,4 @@
-module otp-service
+module bola-wa-service
 
 go 1.19
 

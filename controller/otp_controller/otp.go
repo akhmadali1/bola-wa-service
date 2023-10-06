@@ -1,12 +1,12 @@
 package otp_controller
 
 import (
+	"bola-wa-service/model/otp_model"
 	"context"
 	"crypto/rand"
 	"fmt"
 	"math/big"
 	"net/http"
-	"otp-service/model/otp_model"
 
 	"github.com/gin-gonic/gin"
 	"go.mau.fi/whatsmeow"
