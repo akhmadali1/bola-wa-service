@@ -1,8 +1,8 @@
 package routes
 
 import (
+	"bola-wa-service/controller/otp_controller"
 	"log"
-	"otp-service/controller/otp_controller"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -40,7 +40,7 @@ func SetupRoutes(client *whatsmeow.Client) *gin.Engine {
 	route.Use(middlewares)
 
 	route.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*", "http://localhost:3000"},
+		AllowOrigins:     []string{"*", "http://localhost:8081"},
 		AllowCredentials: true,
 		AllowMethods:     []string{"POST", "PUT", "PATCH", "DELETE", "GET", "OPTIONS", "TRACE", "CONNECT"},
 		AllowHeaders:     []string{"Authorization", "Access-Control-Allow-Origin", "Access-Control-Allow-Headers", "Origin", "Content-Type", "Content-Length", "Date", "origin", "Origins", "x-requested-with", "access-control-allow-methods", "access-control-allow-credentials", "apikey"},
