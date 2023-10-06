@@ -1,11 +1,11 @@
 package main
 
 import (
+	"bola-wa-service/routes"
 	"context"
 	"fmt"
 	"os"
 	"os/signal"
-	"otp-service/routes"
 	"syscall"
 
 	_ "github.com/mattn/go-sqlite3"
