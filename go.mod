@@ -35,11 +35,10 @@ require (
 	github.com/gin-contrib/cors v1.4.0
 	github.com/gin-gonic/gin v1.9.1
 	github.com/gorilla/websocket v1.5.0 // indirect
-	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-sqlite3 v1.14.17
 	github.com/ulule/limiter/v3 v3.11.2
 	go.mau.fi/libsignal v0.1.0 // indirect
 	go.mau.fi/util v0.1.0 // indirect
 	golang.org/x/crypto v0.13.0 // indirect
-	google.golang.org/protobuf v1.31.0 // indirect
+	google.golang.org/protobuf v1.31.0
 )

@@ -2,6 +2,7 @@ package routes
 
 import (
 	"bola-wa-service/controller/otp_controller"
+	"bola-wa-service/controller/payment_controller"
 	"log"
 
 	"github.com/gin-contrib/cors"
@@ -51,6 +52,13 @@ func SetupRoutes(client *whatsmeow.Client) *gin.Engine {
 	{
 		otp.POST("send", func(ctx *gin.Context) {
 			otp_controller.SendOTP(ctx, client)
+		})
+	}
+
+	payment := route.Group("/payment")
+	{
+		payment.POST("send/fieldmaster", func(ctx *gin.Context) {
+			payment_controller.SendNotificationToFieldMaster(ctx, client)
 		})
 	}
 
