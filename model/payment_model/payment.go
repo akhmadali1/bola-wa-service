@@ -3,6 +3,7 @@ package payment_model
 type Payment struct {
 	Id              int    `json:"id"`
 	PhoneNumber     string `json:"phone_number"`
+	Note            string `json:"note"`
 	UserID          int    `json:"user_id"`
 	FieldMasterName string `json:"field_master_name"`
 	FieldName       string `json:"field_name"`

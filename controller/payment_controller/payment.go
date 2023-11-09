@@ -27,6 +27,9 @@ func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
 		return
 	}
+	if PaymentReqBody.Note == "" {
+		PaymentReqBody.Note = "-"
+	}
 	stringTemplate := fmt.Sprintf("Dear *%s*,\n"+
 		"Kami senang untuk memberitahu Anda bahwa lapangan Anda telah berhasil dibooking oleh pelanggan kami. Berikut detail pemesanan:\n\n"+
 		"Nama Pelanggan: *%s*\n"+
@@ -36,11 +39,12 @@ func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client) {
 		"Waktu Mulai Pertandingan: *%s*\n"+
 		"Waktu Selesai Pertandingan: *%s*\n"+
 		"Olahraga: *%s*\n"+
-		"Harga yang Dibayarkan: *%s*\n\n"+
+		"Harga yang Dibayarkan: *%s*\n"+
+		"Note: *%s*\n\n"+
 		"Harap pastikan lapangan dalam kondisi yang baik untuk pertandingan tersebut. Pelanggan kami sangat menantikan pengalaman bermain yang menyenangkan di lapangan Anda.\n"+
 		"Terima kasih atas kerja sama Anda, dan jangan ragu untuk menghubungi kami jika ada pertanyaan atau informasi tambahan yang diperlukan.\n\n"+
 		"Salam hormat,\n"+
-		"Admin Bola", PaymentReqBody.FieldMasterName, PaymentReqBody.CustomerName, PaymentReqBody.FieldName, PaymentReqBody.SubFieldName, PaymentReqBody.CountHours, PaymentReqBody.MatchStart, PaymentReqBody.MatchEnd, PaymentReqBody.CategoryField, PaymentReqBody.AmountFormatted)
+		"Admin Bola", PaymentReqBody.FieldMasterName, PaymentReqBody.CustomerName, PaymentReqBody.FieldName, PaymentReqBody.SubFieldName, PaymentReqBody.CountHours, PaymentReqBody.MatchStart, PaymentReqBody.MatchEnd, PaymentReqBody.CategoryField, PaymentReqBody.AmountFormatted, PaymentReqBody.Note)
 
 	client.SendMessage(context.Background(), jid, &waProto.Message{
 		Conversation: proto.String(stringTemplate),
