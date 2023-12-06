@@ -60,6 +60,9 @@ func SetupRoutes(client *whatsmeow.Client) *gin.Engine {
 		payment.POST("send/fieldmaster", func(ctx *gin.Context) {
 			payment_controller.SendNotificationToFieldMaster(ctx, client)
 		})
+		payment.POST("send/user/refund", func(ctx *gin.Context) {
+			payment_controller.SendNotificationToUserRefund(ctx, client)
+		})
 	}
 
 	return route
