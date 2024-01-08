@@ -125,7 +125,7 @@ func SendNotificationToUserRefund(ctx *gin.Context, client *whatsmeow.Client) {
 	}
 
 	cancelTemplate := fmt.Sprintf("Dear *%s*,\n"+
-		"Kami mohon memberitahu bahwa pemesanan lapangan Anda untuk pertandingan berikut ini telah dibatalkan:\n\n"+
+		"Kami mohon memberitahu bahwa pemesanan lapangan untuk pertandingan berikut ini telah dibatalkan:\n\n"+
 		"Nama Tempat: *%s*\n"+
 		"Nama Lapangan: *%s*\n"+
 		"Durasi Pertandingan: *%d Jam*\n"+
