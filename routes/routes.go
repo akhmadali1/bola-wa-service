@@ -63,5 +63,12 @@ func SetupRoutes(client *whatsmeow.Client) *gin.Engine {
 		})
 	}
 
+	maintain := route.Group("/maintan")
+	{
+		maintain.GET("cron/reminder", func(ctx *gin.Context) {
+			payment_controller.DeleteUnusedCronReminders(ctx)
+		})
+	}
+
 	return route
 }

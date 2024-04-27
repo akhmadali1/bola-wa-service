@@ -5,10 +5,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/robfig/cron/v3"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"
@@ -21,6 +23,12 @@ type Payment struct {
 }
 
 var notificationLock sync.Mutex // Mutex to synchronize access to the notification status
+
+var (
+	cronScheduler *cron.Cron
+	reminderMap   = make(map[string]cron.EntryID)
+	mu            sync.Mutex
+)
 
 func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client) {
 	var PaymentReqBody Payment
@@ -77,34 +85,76 @@ func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client) {
 	// Calculate the duration until 1 hour before matchStartTime
 	notificationTime := matchStartTime.Add(-time.Hour)
 
-	go func() {
-		sendMessageToFieldMaster(ctx, client, jid, stringTemplate)
-	}()
+	sendMessageToFieldMaster(ctx, client, jid, stringTemplate)
 
-	go func() {
-		for !PaymentReqBody.NotificationSent {
-			// Check if the current time is after the notification time
-			if time.Now().After(notificationTime) {
-				// Send the notification
-				stringCustomerPhonenum := fmt.Sprintf("%s@s.whatsapp.net", PaymentReqBody.CustomerPhoneNumber)
-				jidCustomer, err := types.ParseJID(stringCustomerPhonenum)
-				if err != nil {
-					fmt.Println("Error:", err)
-					ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
-					return
-				}
+	mu.Lock()
+	defer mu.Unlock()
 
-				reminderTemplate := fmt.Sprintf("Reminder: Pertandingan di lapangan *%s* akan dimulai dalam +- 1 jam.", PaymentReqBody.FieldName)
-				sendMessageToFieldMaster(ctx, client, jidCustomer, reminderTemplate)
-				// Update the notification status after sending the notification
-				PaymentReqBody.NotificationSent = true
-			}
-			// Sleep for some time before checking again
-			time.Sleep(time.Second)
+	if entryID, ok := reminderMap[notificationTime.String()+"@"+PaymentReqBody.CustomerPhoneNumber]; ok {
+		cronScheduler.Remove(entryID)
+	}
+
+	cronExpression := createCronExpression(notificationTime)
+
+	entryID, err := cronScheduler.AddFunc(cronExpression, func() {
+		// Send email notification
+		stringCustomerPhonenum := fmt.Sprintf("%s@s.whatsapp.net", PaymentReqBody.CustomerPhoneNumber)
+		jidCustomer, err := types.ParseJID(stringCustomerPhonenum)
+		if err != nil {
+			fmt.Println("Error:", err)
+			ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
+			return
 		}
-	}()
+
+		reminderTemplate := fmt.Sprintf("Reminder: Pertandingan di lapangan *%s* akan dimulai dalam +- 1 jam.", PaymentReqBody.FieldName)
+		sendMessageToFieldMaster(ctx, client, jidCustomer, reminderTemplate)
+
+		PaymentReqBody.NotificationSent = true
+	})
+
+	if err != nil {
+		fmt.Println("Error:", err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
+		return
+	}
+
+	reminderMap[notificationTime.String()+"@"+PaymentReqBody.CustomerPhoneNumber] = entryID
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "Success"})
+}
+
+func DeleteUnusedCronReminders(ctx *gin.Context) {
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		fmt.Println("Error loading location:", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"Error": "Failed to load location"})
+		return
+	}
+
+	now := time.Now().In(loc)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	for notificationTime, entryID := range reminderMap {
+		notificationTimeSplit := strings.Split(notificationTime, "@")
+		matchTime, err := time.ParseInLocation("2006-01-02 15:04:05.999999999 -0700 MST", notificationTimeSplit[0], loc)
+		if err != nil {
+			fmt.Println("Error parsing Match time:", err)
+			ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
+			return
+		}
+
+		if now.After(matchTime) {
+			cronScheduler.Remove(entryID)
+			delete(reminderMap, notificationTime)
+		}
+	}
+}
+
+func createCronExpression(t time.Time) string {
+	// Format the time to the cron syntax: Minute Hour DayOfMonth Month DayOfWeek
+	return fmt.Sprintf("%d %d %d %d *", t.Minute(), t.Hour(), t.Day(), int(t.Month()))
 }
 
 func SendNotificationToUserRefund(ctx *gin.Context, client *whatsmeow.Client) {
@@ -142,22 +192,12 @@ func SendNotificationToUserRefund(ctx *gin.Context, client *whatsmeow.Client) {
 		"Salam hormat,\n"+
 		"Admin Bola", PaymentReqBody.FieldMasterName, PaymentReqBody.FieldName, PaymentReqBody.SubFieldName, PaymentReqBody.CountHours, PaymentReqBody.MatchStart, PaymentReqBody.MatchEnd, PaymentReqBody.CategoryField, PaymentReqBody.AmountFormatted, PaymentReqBody.Note)
 
-	// Check if the notification has already been sent
-	notificationLock.Lock()
-	if !PaymentReqBody.NotificationSent {
-		go func() {
-			sendMessageToUserRefund(ctx, client, jid, cancelTemplate)
-			// Update the notification status after sending the notification
-			PaymentReqBody.NotificationSent = true
-		}()
-	}
-	notificationLock.Unlock()
+	sendMessageToUserRefund(ctx, client, jid, cancelTemplate)
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "Success"})
 }
 
 func sendMessageToFieldMaster(ctx *gin.Context, client *whatsmeow.Client, jid types.JID, stringTemplate string) {
-
 	if _, err := client.SendMessage(context.Background(), jid, &waProto.Message{
 		Conversation: proto.String(stringTemplate),
 	}); err != nil {
