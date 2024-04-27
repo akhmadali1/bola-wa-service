@@ -59,8 +59,16 @@ func main() {
 		}
 	}
 
-	cronScheduler = cron.New()
-	cronScheduler.Start()
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		panic(err)
+	}
+
+	cronScheduler = cron.New(cron.WithLocation(loc))
+
+	// stop scheduler tepat sebelum fungsi berakhir
+	go cronScheduler.Start()
+	defer cronScheduler.Stop()
 
 	router := routes.SetupRoutes(client, cronScheduler, reminderMap)
 	router.Run(":8073")
@@ -74,6 +82,7 @@ func main() {
 	sig := <-signalChan
 	fmt.Printf("Received signal: %v\n", sig)
 	client.Disconnect()
+	cronScheduler.Stop()
 	os.Exit(0)
 }
 
