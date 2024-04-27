@@ -11,9 +11,15 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/robfig/cron/v3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	waLog "go.mau.fi/whatsmeow/util/log"
+)
+
+var (
+	cronScheduler *cron.Cron
+	reminderMap   = make(map[string]cron.EntryID)
 )
 
 var client *whatsmeow.Client
@@ -53,7 +59,10 @@ func main() {
 		}
 	}
 
-	router := routes.SetupRoutes(client)
+	cronScheduler = cron.New()
+	cronScheduler.Start()
+
+	router := routes.SetupRoutes(client, cronScheduler, reminderMap)
 	router.Run(":8073")
 	go monitorConnection()
 

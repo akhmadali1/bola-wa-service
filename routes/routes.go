@@ -6,13 +6,14 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/robfig/cron/v3"
 	limiter "github.com/ulule/limiter/v3"
 	mgin "github.com/ulule/limiter/v3/drivers/middleware/gin"
 	"github.com/ulule/limiter/v3/drivers/store/memory"
 	"go.mau.fi/whatsmeow"
 )
 
-func SetupRoutes(client *whatsmeow.Client) *gin.Engine {
+func SetupRoutes(client *whatsmeow.Client, cronScheduler *cron.Cron, reminderMap map[string]cron.EntryID) *gin.Engine {
 	route := gin.Default()
 
 	// Note: Rate Limiter
@@ -56,7 +57,7 @@ func SetupRoutes(client *whatsmeow.Client) *gin.Engine {
 	payment := route.Group("/payment")
 	{
 		payment.POST("send/fieldmaster", func(ctx *gin.Context) {
-			payment_controller.SendNotificationToFieldMaster(ctx, client)
+			payment_controller.SendNotificationToFieldMaster(ctx, client, cronScheduler, reminderMap)
 		})
 		payment.POST("send/user/refund", func(ctx *gin.Context) {
 			payment_controller.SendNotificationToUserRefund(ctx, client)
@@ -66,7 +67,7 @@ func SetupRoutes(client *whatsmeow.Client) *gin.Engine {
 	maintain := route.Group("/maintan")
 	{
 		maintain.GET("cron/reminder", func(ctx *gin.Context) {
-			payment_controller.DeleteUnusedCronReminders(ctx)
+			payment_controller.DeleteUnusedCronReminders(ctx, cronScheduler, reminderMap)
 		})
 	}
 

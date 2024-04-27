@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -22,15 +21,7 @@ type Payment struct {
 	NotificationSent bool // Indicates whether the notification has been sent
 }
 
-var notificationLock sync.Mutex // Mutex to synchronize access to the notification status
-
-var (
-	cronScheduler *cron.Cron
-	reminderMap   = make(map[string]cron.EntryID)
-	mu            sync.Mutex
-)
-
-func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client) {
+func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client, cronScheduler *cron.Cron, reminderMap map[string]cron.EntryID) {
 	var PaymentReqBody Payment
 	if err := ctx.ShouldBindJSON(&PaymentReqBody); err != nil {
 		fmt.Println(err)
@@ -87,10 +78,14 @@ func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client) {
 
 	sendMessageToFieldMaster(ctx, client, jid, stringTemplate)
 
-	mu.Lock()
-	defer mu.Unlock()
+	if time.Now().After(notificationTime) {
+		notificationTime = time.Now().In(loc).Add(time.Minute)
+	}
 
-	if entryID, ok := reminderMap[notificationTime.String()+"@"+PaymentReqBody.CustomerPhoneNumber]; ok {
+	notificationTimeSplit := strings.Split(notificationTime.String(), " ")
+	getDateAndHours := notificationTimeSplit[0] + notificationTimeSplit[1]
+
+	if entryID, ok := reminderMap[getDateAndHours+"@"+PaymentReqBody.CustomerPhoneNumber]; ok {
 		cronScheduler.Remove(entryID)
 	}
 
@@ -118,12 +113,12 @@ func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client) {
 		return
 	}
 
-	reminderMap[notificationTime.String()+"@"+PaymentReqBody.CustomerPhoneNumber] = entryID
+	reminderMap[getDateAndHours+"@"+PaymentReqBody.CustomerPhoneNumber] = entryID
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "Success"})
 }
 
-func DeleteUnusedCronReminders(ctx *gin.Context) {
+func DeleteUnusedCronReminders(ctx *gin.Context, cronScheduler *cron.Cron, reminderMap map[string]cron.EntryID) {
 	loc, err := time.LoadLocation("Asia/Jakarta")
 	if err != nil {
 		fmt.Println("Error loading location:", err)
@@ -132,24 +127,25 @@ func DeleteUnusedCronReminders(ctx *gin.Context) {
 	}
 
 	now := time.Now().In(loc)
-
-	mu.Lock()
-	defer mu.Unlock()
-
+	var notificationTimeArray []string
 	for notificationTime, entryID := range reminderMap {
 		notificationTimeSplit := strings.Split(notificationTime, "@")
-		matchTime, err := time.ParseInLocation("2006-01-02 15:04:05.999999999 -0700 MST", notificationTimeSplit[0], loc)
+		fmt.Println(notificationTimeSplit)
+		matchTime, err := time.ParseInLocation("2006-01-0215:04:05.999999999", notificationTimeSplit[0], loc)
 		if err != nil {
 			fmt.Println("Error parsing Match time:", err)
-			ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
+			ctx.JSON(http.StatusBadRequest, gin.H{"Error": err, "Time": notificationTime})
 			return
 		}
 
 		if now.After(matchTime) {
 			cronScheduler.Remove(entryID)
+			notificationTimeArray = append(notificationTimeArray, notificationTime)
 			delete(reminderMap, notificationTime)
 		}
 	}
+
+	ctx.JSON(http.StatusOK, gin.H{"Time": notificationTimeArray})
 }
 
 func createCronExpression(t time.Time) string {
