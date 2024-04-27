@@ -30,7 +30,7 @@ func main() {
 		panic(err)
 	}
 
-	clientLog := waLog.Stdout("Client", "DEBUG", true)
+	clientLog := waLog.Stdout("Client", "DEBUG", false)
 	client = whatsmeow.NewClient(deviceStore, clientLog)
 
 	if client.Store.ID == nil {
