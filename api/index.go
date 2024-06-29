@@ -1,9 +1,10 @@
-package main
+package api
 
 import (
 	"bola-wa-service/routes"
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -105,7 +106,11 @@ func restartService() {
 	}
 }
 
-func Handler(c *gin.Context) {
+var (
+	app *gin.Engine
+)
+
+func init() {
 	dbLog := waLog.Stdout("Database", "DEBUG", true)
 	container, err := sqlstore.New("sqlite3", "file:otpdbtemp.db?_foreign_keys=on", dbLog)
 	if err != nil {
@@ -151,9 +156,8 @@ func Handler(c *gin.Context) {
 	go cronScheduler.Start()
 	defer cronScheduler.Stop()
 
-	gin.SetMode(gin.ReleaseMode)
 	router := routes.SetupRoutes(client, cronScheduler, reminderMap)
-	router.ServeHTTP(c.Writer, c.Request)
+	app = router
 	go monitorConnection()
 
 	// Use a buffered channel for signals to prevent SA1017 warning
@@ -166,4 +170,8 @@ func Handler(c *gin.Context) {
 	client.Disconnect()
 	cronScheduler.Stop()
 	os.Exit(0)
+}
+
+func Handler(w http.ResponseWriter, r *http.Request) {
+	app.ServeHTTP(w, r)
 }
