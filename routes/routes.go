@@ -3,6 +3,7 @@ package routes
 import (
 	"bola-wa-service/controller/otp_controller"
 	"bola-wa-service/controller/payment_controller"
+	"net/http"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -70,6 +71,13 @@ func SetupRoutes(client *whatsmeow.Client, cronScheduler *cron.Cron, reminderMap
 			payment_controller.DeleteUnusedCronReminders(ctx, cronScheduler, reminderMap)
 		})
 	}
+
+	route.GET("/health", func(c *gin.Context) {
+		if client == nil {
+			c.JSON(http.StatusOK, gin.H{"status": "wa not healthy"})
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+	})
 
 	return route
 }
