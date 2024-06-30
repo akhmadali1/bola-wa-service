@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -20,15 +21,20 @@ import (
 )
 
 var (
+	app           *gin.Engine
+	client        *whatsmeow.Client
 	cronScheduler *cron.Cron
 	reminderMap   = make(map[string]cron.EntryID)
 )
 
-var client *whatsmeow.Client
-
 // func main() {
 // 	dbLog := waLog.Stdout("Database", "DEBUG", true)
-// 	container, err := sqlstore.New("sqlite3", "file:otpdbtemp.db?_foreign_keys=on", dbLog)
+// 	dbPath, err := filepath.Abs("otpdbtemp.db")
+// 	if err != nil {
+// 		panic(err)
+// 	}
+
+// 	container, err := sqlstore.New("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath), dbLog)
 // 	if err != nil {
 // 		panic(err)
 // 	}
@@ -106,13 +112,14 @@ func restartService() {
 	}
 }
 
-var (
-	app *gin.Engine
-)
-
 func init() {
 	dbLog := waLog.Stdout("Database", "DEBUG", true)
-	container, err := sqlstore.New("sqlite3", "file:otpdbtemp.db?_foreign_keys=on", dbLog)
+	dbPath, err := filepath.Abs("otpdbtemp.db")
+	if err != nil {
+		panic(err)
+	}
+
+	container, err := sqlstore.New("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath), dbLog)
 	if err != nil {
 		panic(err)
 	}
