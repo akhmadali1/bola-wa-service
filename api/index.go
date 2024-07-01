@@ -15,58 +15,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	waBinary "go.mau.fi/whatsmeow/binary"
-	"google.golang.org/protobuf/proto"
 
 	// _ "github.com/mattn/go-sqlite3"
 	_ "github.com/lib/pq"
 	"github.com/robfig/cron/v3"
 	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/proto/waCompanionReg"
-	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
-
-var (
-	app           *gin.Engine
-	client        *whatsmeow.Client
-	cronScheduler *cron.Cron
-	reminderMap   = make(map[string]cron.EntryID)
-)
-var log waLog.Logger
-
-var logLevel = "INFO"
-var debugLogs = flag.Bool("debug", false, "Enable debug logs?")
-
-// var dbDialect = flag.String("db-dialect", "postgres", "Database dialect (sqlite3 or postgres)")
-// var dbAddress = flag.String("db-address", "file:mdtest.db?_foreign_keys=on", "Database address")
-var requestFullSync = flag.Bool("request-full-sync", false, "Request full (1 year) history sync when logging in?")
-var pairRejectChan = make(chan bool, 1)
-
-func OpenConnection() *sql.DB {
-
-	host := os.Getenv("DB_HOST")
-	port := 5432
-	user := os.Getenv("DB_USER")
-	password := os.Getenv("DB_PW")
-	dbname := os.Getenv("DB_NAME")
-
-	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
-		"password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
-	fmt.Println(psqlInfo)
-	db, err := sql.Open("postgres", psqlInfo)
-	if err != nil {
-		panic(err)
-	}
-	err = db.Ping()
-	if err != nil {
-		panic(err)
-	}
-	db.SetMaxOpenConns(10)
-	return db
-}
 
 // func main() {
 // 	dbLog := waLog.Stdout("Database", "DEBUG", true)
@@ -168,45 +125,62 @@ func OpenConnection() *sql.DB {
 //		}
 //	}
 
+var (
+	app           *gin.Engine
+	client        *whatsmeow.Client
+	cronScheduler *cron.Cron
+	reminderMap   = make(map[string]cron.EntryID)
+	log           waLog.Logger
+	logLevel      = "INFO"
+	debugLogs     = flag.Bool("debug", false, "Enable debug logs?")
+	// requestFullSync = flag.Bool("request-full-sync", false, "Request full (1 year) history sync when logging in?")
+	pairRejectChan = make(chan bool, 1)
+)
+
+func OpenConnection() *sql.DB {
+
+	host := os.Getenv("DB_HOST")
+	port := 5432
+	user := os.Getenv("DB_USER")
+	password := os.Getenv("DB_PW")
+	dbname := os.Getenv("DB_NAME")
+
+	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
+		"password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
+	fmt.Println(psqlInfo)
+	db, err := sql.Open("postgres", psqlInfo)
+	if err != nil {
+		panic(err)
+	}
+	err = db.Ping()
+	if err != nil {
+		panic(err)
+	}
+	db.SetMaxOpenConns(10)
+	return db
+}
+
 func init() {
 	// err := godotenv.Load()
 	// if err != nil {
 	// 	fmt.Println(err)
 	// 	return
 	// }
-	waBinary.IndentXML = true
 	flag.Parse()
-
 	if *debugLogs {
 		logLevel = "DEBUG"
-	}
-	if *requestFullSync {
-		store.DeviceProps.RequireFullSync = proto.Bool(true)
-		store.DeviceProps.HistorySyncConfig = &waCompanionReg.DeviceProps_HistorySyncConfig{
-			FullSyncDaysLimit:   proto.Uint32(3650),
-			FullSyncSizeMbLimit: proto.Uint32(102400),
-			StorageQuotaMb:      proto.Uint32(102400),
-		}
 	}
 	log = waLog.Stdout("Main", logLevel, true)
 
 	dbLog := waLog.Stdout("Database", logLevel, true)
 	db := OpenConnection()
 
-	// Ensure the schema is created
-	err := EnsureSchema(db)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to create schema: %v", err))
+	errDB := EnsureSchema(db)
+	if errDB != nil {
+		panic(fmt.Sprintf("Failed to create schema: %v", errDB))
 	}
 
-	// Create the container with the PostgreSQL connection
 	storeContainer := sqlstore.NewWithDB(db, "postgres", dbLog)
-
-	// storeContainer, err := sqlstore.New(*dbDialect, *dbAddress, dbLog)
-	// if err != nil {
-	// 	log.Errorf("Failed to connect to database: %v", err)
-	// 	return
-	// }
 	device, err := storeContainer.GetFirstDevice()
 	if err != nil {
 		log.Errorf("Failed to get device: %v", err)
@@ -233,7 +207,6 @@ func init() {
 
 	ch, err := client.GetQRChannel(context.Background())
 	if err != nil {
-		// This error means that we're already logged in, so ignore it.
 		if !errors.Is(err, whatsmeow.ErrQRStoreContainsID) {
 			log.Errorf("Failed to get QR channel: %v", err)
 		}
@@ -249,7 +222,6 @@ func init() {
 		}()
 	}
 
-	// client.AddEventHandler(handler)
 	err = client.Connect()
 	if err != nil {
 		log.Errorf("Failed to connect: %v", err)
@@ -262,8 +234,6 @@ func init() {
 	}
 
 	cronScheduler = cron.New(cron.WithLocation(loc))
-
-	// stop scheduler tepat sebelum fungsi berakhir
 	go cronScheduler.Start()
 	defer cronScheduler.Stop()
 
@@ -277,7 +247,6 @@ func init() {
 	fmt.Printf("Received signal: %v\n", sig)
 	client.Disconnect()
 	cronScheduler.Stop()
-	os.Exit(0)
 
 }
 
