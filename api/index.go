@@ -4,21 +4,28 @@ import (
 	"bola-wa-service/routes"
 	"context"
 	"database/sql"
+	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	waBinary "go.mau.fi/whatsmeow/binary"
+	"google.golang.org/protobuf/proto"
 
 	// _ "github.com/mattn/go-sqlite3"
 	_ "github.com/lib/pq"
 	"github.com/robfig/cron/v3"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
@@ -28,6 +35,15 @@ var (
 	cronScheduler *cron.Cron
 	reminderMap   = make(map[string]cron.EntryID)
 )
+var log waLog.Logger
+
+var logLevel = "INFO"
+var debugLogs = flag.Bool("debug", false, "Enable debug logs?")
+
+// var dbDialect = flag.String("db-dialect", "postgres", "Database dialect (sqlite3 or postgres)")
+// var dbAddress = flag.String("db-address", "file:mdtest.db?_foreign_keys=on", "Database address")
+var requestFullSync = flag.Bool("request-full-sync", false, "Request full (1 year) history sync when logging in?")
+var pairRejectChan = make(chan bool, 1)
 
 func OpenConnection() *sql.DB {
 
@@ -127,43 +143,54 @@ func OpenConnection() *sql.DB {
 // 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 
 // 	// Use a simple channel receive instead of select with a single case (S1000)
-// 	sig := <-signalChan
-// 	fmt.Printf("Received signal: %v\n", sig)
-// 	client.Disconnect()
-// 	cronScheduler.Stop()
-// 	os.Exit(0)
+// sig := <-signalChan
+// fmt.Printf("Received signal: %v\n", sig)
+// client.Disconnect()
+// cronScheduler.Stop()
+// os.Exit(0)
 // }
 
-func monitorConnection() {
-	for {
-		time.Sleep(time.Second * 10) // Adjust the interval based on your requirements
-		if !client.IsConnected() {
-			fmt.Println("Connection lost. Restarting service...")
-			restartService()
-		}
-	}
-}
+// func monitorConnection() {
+// 	for {
+// 		time.Sleep(time.Second * 10) // Adjust the interval based on your requirements
+// 		if !client.IsConnected() {
+// 			fmt.Println("Connection lost. Restarting service...")
+// 			restartService()
+// 		}
+// 	}
+// }
 
-func restartService() {
-	cmd := exec.Command("sudo", "service", "bola-wa-service", "restart")
-	err := cmd.Run()
-	if err != nil {
-		fmt.Println("Error restarting service:", err)
-	}
-}
+//	func restartService() {
+//		cmd := exec.Command("sudo", "service", "bola-wa-service", "restart")
+//		err := cmd.Run()
+//		if err != nil {
+//			fmt.Println("Error restarting service:", err)
+//		}
+//	}
 
 func init() {
-	dbLog := waLog.Stdout("Database", "DEBUG", true)
-	// dbPath, err := filepath.Abs("otpdbtemp.db")
+	// err := godotenv.Load()
 	// if err != nil {
-	// 	panic(err)
+	// 	fmt.Println(err)
+	// 	return
 	// }
+	waBinary.IndentXML = true
+	flag.Parse()
 
-	// container, err := sqlstore.New("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", dbPath), dbLog)
-	// if err != nil {
-	// 	panic(err)
-	// }
+	if *debugLogs {
+		logLevel = "DEBUG"
+	}
+	if *requestFullSync {
+		store.DeviceProps.RequireFullSync = proto.Bool(true)
+		store.DeviceProps.HistorySyncConfig = &waCompanionReg.DeviceProps_HistorySyncConfig{
+			FullSyncDaysLimit:   proto.Uint32(3650),
+			FullSyncSizeMbLimit: proto.Uint32(102400),
+			StorageQuotaMb:      proto.Uint32(102400),
+		}
+	}
+	log = waLog.Stdout("Main", logLevel, true)
 
+	dbLog := waLog.Stdout("Database", logLevel, true)
 	db := OpenConnection()
 
 	// Ensure the schema is created
@@ -173,34 +200,60 @@ func init() {
 	}
 
 	// Create the container with the PostgreSQL connection
-	container := sqlstore.NewWithDB(db, "postgres", dbLog)
+	storeContainer := sqlstore.NewWithDB(db, "postgres", dbLog)
 
-	deviceStore, err := container.GetFirstDevice()
+	// storeContainer, err := sqlstore.New(*dbDialect, *dbAddress, dbLog)
+	// if err != nil {
+	// 	log.Errorf("Failed to connect to database: %v", err)
+	// 	return
+	// }
+	device, err := storeContainer.GetFirstDevice()
 	if err != nil {
-		panic(err)
+		log.Errorf("Failed to get device: %v", err)
+		return
 	}
 
-	clientLog := waLog.Stdout("Client", "DEBUG", false)
-	client = whatsmeow.NewClient(deviceStore, clientLog)
-
-	if client.Store.ID == nil {
-		qrChan, _ := client.GetQRChannel(context.Background())
-		err = client.Connect()
-		if err != nil {
-			panic(err)
-		}
-		for evt := range qrChan {
-			if evt.Event == "code" {
-				fmt.Println("QR code:", evt.Code)
-			} else {
-				fmt.Println("Login event:", evt.Event)
+	client = whatsmeow.NewClient(device, waLog.Stdout("Client", logLevel, true))
+	var isWaitingForPair atomic.Bool
+	client.PrePairCallback = func(jid types.JID, platform, businessName string) bool {
+		isWaitingForPair.Store(true)
+		defer isWaitingForPair.Store(false)
+		log.Infof("Pairing %s (platform: %q, business name: %q). Type r within 3 seconds to reject pair", jid, platform, businessName)
+		select {
+		case reject := <-pairRejectChan:
+			if reject {
+				log.Infof("Rejecting pair")
+				return false
 			}
+		case <-time.After(3 * time.Second):
+		}
+		log.Infof("Accepting pair")
+		return true
+	}
+
+	ch, err := client.GetQRChannel(context.Background())
+	if err != nil {
+		// This error means that we're already logged in, so ignore it.
+		if !errors.Is(err, whatsmeow.ErrQRStoreContainsID) {
+			log.Errorf("Failed to get QR channel: %v", err)
 		}
 	} else {
-		err = client.Connect()
-		if err != nil {
-			panic(err)
-		}
+		go func() {
+			for evt := range ch {
+				if evt.Event == "code" {
+					fmt.Println("QR code:", evt.Code)
+				} else {
+					fmt.Println("Login event:", evt.Event)
+				}
+			}
+		}()
+	}
+
+	// client.AddEventHandler(handler)
+	err = client.Connect()
+	if err != nil {
+		log.Errorf("Failed to connect: %v", err)
+		return
 	}
 
 	loc, err := time.LoadLocation("Asia/Jakarta")
@@ -216,18 +269,16 @@ func init() {
 
 	router := routes.SetupRoutes(client, cronScheduler, reminderMap)
 	app = router
-	go monitorConnection()
+	// app.Run(":8073")
 
-	// Use a buffered channel for signals to prevent SA1017 warning
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
-
-	// Use a simple channel receive instead of select with a single case (S1000)
 	sig := <-signalChan
 	fmt.Printf("Received signal: %v\n", sig)
 	client.Disconnect()
 	cronScheduler.Stop()
 	os.Exit(0)
+
 }
 
 func Handler(w http.ResponseWriter, r *http.Request) {
