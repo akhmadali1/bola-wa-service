@@ -5,79 +5,62 @@ import (
 	"bola-wa-service/controller/payment_controller"
 	"net/http"
 
-	"github.com/gin-contrib/cors"
-	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
-	limiter "github.com/ulule/limiter/v3"
-	mgin "github.com/ulule/limiter/v3/drivers/middleware/gin"
+	"github.com/ulule/limiter/v3"
+	mhttp "github.com/ulule/limiter/v3/drivers/middleware/stdlib"
 	"github.com/ulule/limiter/v3/drivers/store/memory"
 	"go.mau.fi/whatsmeow"
 )
 
-func SetupRoutes(client *whatsmeow.Client, cronScheduler *cron.Cron, reminderMap map[string]cron.EntryID) *gin.Engine {
-	route := gin.Default()
+func SetupRoutes(client *whatsmeow.Client, cronScheduler *cron.Cron, reminderMap map[string]cron.EntryID) http.Handler {
+	mux := http.NewServeMux()
 
-	// Note: Rate Limiter
-	// * 5 reqs/second: "5-S"
-	// * 10 reqs/minute: "10-M"
-	// * 1000 reqs/hour: "1000-H"
-	// * 2000 reqs/day: "2000-D"
-
-	// limit to 1000 requests per second. if exceed, will return http 429 (too many req)
+	// Rate limiter configuration
 	rate, err := limiter.NewRateFromFormatted("1000-S")
 	if err != nil {
-		return route
+		panic(err)
 	}
-
 	store := memory.NewStore()
+	rateLimiter := mhttp.NewMiddleware(limiter.New(store, rate))
 
-	// Create a new middleware with the limiter instance using in memory golang.
-	middlewares := mgin.NewMiddleware(limiter.New(store, rate))
-
-	// Forward / Save Client ip to go memory.
-	route.ForwardedByClientIP = true
-
-	// Use Middleware rate limiter
-	route.Use(middlewares)
-
-	route.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*", "http://localhost:8081", "https://ntxxm6jj-8081.asse.devtunnels.ms"},
-		AllowCredentials: true,
-		AllowMethods:     []string{"POST", "PUT", "PATCH", "DELETE", "GET", "OPTIONS", "TRACE", "CONNECT"},
-		AllowHeaders:     []string{"Authorization", "Access-Control-Allow-Origin", "Access-Control-Allow-Headers", "Origin", "Content-Type", "Content-Length", "Date", "origin", "Origins", "x-requested-with", "access-control-allow-methods", "access-control-allow-credentials", "apikey"},
-		ExposeHeaders:    []string{"Content-Length"},
-	}))
-
-	otp := route.Group("/otp")
-	{
-		otp.POST("send", func(ctx *gin.Context) {
-			otp_controller.SendOTP(ctx, client)
+	// CORS configuration
+	corsHandler := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
 
-	payment := route.Group("/payment")
-	{
-		payment.POST("send/fieldmaster", func(ctx *gin.Context) {
-			payment_controller.SendNotificationToFieldMaster(ctx, client, cronScheduler, reminderMap)
-		})
-		payment.POST("send/user/refund", func(ctx *gin.Context) {
-			payment_controller.SendNotificationToUserRefund(ctx, client)
-		})
-	}
+	// Apply middleware and set routes
+	mux.Handle("/otp/send", corsHandler(rateLimiter.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		otp_controller.SendOTP(w, r, client)
+	}))))
 
-	maintain := route.Group("/maintan")
-	{
-		maintain.GET("cron/reminder", func(ctx *gin.Context) {
-			payment_controller.DeleteUnusedCronReminders(ctx, cronScheduler, reminderMap)
-		})
-	}
+	mux.Handle("/payment/send/fieldmaster", corsHandler(rateLimiter.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payment_controller.SendNotificationToFieldMaster(w, r, client, cronScheduler, reminderMap)
+	}))))
 
-	route.GET("/health", func(c *gin.Context) {
+	mux.Handle("/payment/send/user/refund", corsHandler(rateLimiter.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payment_controller.SendNotificationToUserRefund(w, r, client)
+	}))))
+
+	mux.Handle("/maintan/cron/reminder", corsHandler(rateLimiter.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payment_controller.DeleteUnusedCronReminders(w, r, cronScheduler, reminderMap)
+	}))))
+
+	mux.Handle("/health", corsHandler(rateLimiter.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if client == nil {
-			c.JSON(http.StatusOK, gin.H{"status": "wa not healthy"})
+			http.Error(w, "wa not healthy", http.StatusInternalServerError)
+		} else {
+			w.Write([]byte(`{"status": "healthy"}`))
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
-	})
+	}))))
 
-	return route
+	return mux
 }

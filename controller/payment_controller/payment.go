@@ -3,15 +3,15 @@ package payment_controller
 import (
 	"bola-wa-service/model/payment_model"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
 	"go.mau.fi/whatsmeow"
-	waProto "go.mau.fi/whatsmeow/binary/proto"
+	waProto "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
@@ -21,11 +21,10 @@ type Payment struct {
 	NotificationSent bool // Indicates whether the notification has been sent
 }
 
-func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client, cronScheduler *cron.Cron, reminderMap map[string]cron.EntryID) {
+func SendNotificationToFieldMaster(w http.ResponseWriter, r *http.Request, client *whatsmeow.Client, cronScheduler *cron.Cron, reminderMap map[string]cron.EntryID) {
 	var PaymentReqBody Payment
-	if err := ctx.ShouldBindJSON(&PaymentReqBody); err != nil {
-		fmt.Println(err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
+	if err := json.NewDecoder(r.Body).Decode(&PaymentReqBody); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -33,7 +32,7 @@ func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client, c
 	jid, err := types.ParseJID(stringPhonenum)
 	if err != nil {
 		fmt.Println("Error:", err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -61,7 +60,7 @@ func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client, c
 	loc, err := time.LoadLocation("Asia/Jakarta")
 	if err != nil {
 		fmt.Println("Error loading location:", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"Error": "Failed to load location"})
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -69,14 +68,14 @@ func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client, c
 	matchStartTime, err := time.ParseInLocation("Monday, 02 Jan 2006 15:04:05", PaymentReqBody.MatchStart, loc)
 	if err != nil {
 		fmt.Println("Error parsing MatchStart time:", err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Calculate the duration until 1 hour before matchStartTime
 	notificationTime := matchStartTime.Add(-time.Hour)
 
-	sendMessageToFieldMaster(ctx, client, jid, stringTemplate)
+	sendMessageToFieldMaster(w, client, jid, stringTemplate)
 
 	if time.Now().After(notificationTime) {
 		notificationTime = time.Now().In(loc).Add(time.Minute)
@@ -97,32 +96,34 @@ func SendNotificationToFieldMaster(ctx *gin.Context, client *whatsmeow.Client, c
 		jidCustomer, err := types.ParseJID(stringCustomerPhonenum)
 		if err != nil {
 			fmt.Println("Error:", err)
-			ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		reminderTemplate := fmt.Sprintf("Reminder: Pertandingan di lapangan *%s* akan dimulai dalam +- 1 jam.", PaymentReqBody.FieldName)
-		sendMessageToFieldMaster(ctx, client, jidCustomer, reminderTemplate)
+		sendMessageToFieldMaster(w, client, jidCustomer, reminderTemplate)
 
 		PaymentReqBody.NotificationSent = true
 	})
 
 	if err != nil {
 		fmt.Println("Error:", err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	reminderMap[getDateAndHours+"@"+PaymentReqBody.CustomerPhoneNumber] = entryID
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Success"})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Success"})
 }
 
-func DeleteUnusedCronReminders(ctx *gin.Context, cronScheduler *cron.Cron, reminderMap map[string]cron.EntryID) {
+func DeleteUnusedCronReminders(w http.ResponseWriter, r *http.Request, cronScheduler *cron.Cron, reminderMap map[string]cron.EntryID) {
 	loc, err := time.LoadLocation("Asia/Jakarta")
 	if err != nil {
 		fmt.Println("Error loading location:", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"Error": "Failed to load location"})
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -134,7 +135,7 @@ func DeleteUnusedCronReminders(ctx *gin.Context, cronScheduler *cron.Cron, remin
 		matchTime, err := time.ParseInLocation("2006-01-0215:04:05.999999999", notificationTimeSplit[0], loc)
 		if err != nil {
 			fmt.Println("Error parsing Match time:", err)
-			ctx.JSON(http.StatusBadRequest, gin.H{"Error": err, "Time": notificationTime})
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -144,8 +145,9 @@ func DeleteUnusedCronReminders(ctx *gin.Context, cronScheduler *cron.Cron, remin
 			delete(reminderMap, notificationTime)
 		}
 	}
-
-	ctx.JSON(http.StatusOK, gin.H{"Time": notificationTimeArray})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string][]string{"Time": notificationTimeArray})
 }
 
 func createCronExpression(t time.Time) string {
@@ -153,11 +155,10 @@ func createCronExpression(t time.Time) string {
 	return fmt.Sprintf("%d %d %d %d *", t.Minute(), t.Hour(), t.Day(), int(t.Month()))
 }
 
-func SendNotificationToUserRefund(ctx *gin.Context, client *whatsmeow.Client) {
+func SendNotificationToUserRefund(w http.ResponseWriter, r *http.Request, client *whatsmeow.Client) {
 	var PaymentReqBody Payment
-	if err := ctx.ShouldBindJSON(&PaymentReqBody); err != nil {
-		fmt.Println(err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
+	if err := json.NewDecoder(r.Body).Decode(&PaymentReqBody); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -165,7 +166,7 @@ func SendNotificationToUserRefund(ctx *gin.Context, client *whatsmeow.Client) {
 	jid, err := types.ParseJID(stringPhonenum)
 	if err != nil {
 		fmt.Println("Error:", err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"Error": err})
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -188,26 +189,28 @@ func SendNotificationToUserRefund(ctx *gin.Context, client *whatsmeow.Client) {
 		"Salam hormat,\n"+
 		"Admin Bola", PaymentReqBody.FieldMasterName, PaymentReqBody.FieldName, PaymentReqBody.SubFieldName, PaymentReqBody.CountHours, PaymentReqBody.MatchStart, PaymentReqBody.MatchEnd, PaymentReqBody.CategoryField, PaymentReqBody.AmountFormatted, PaymentReqBody.Note)
 
-	sendMessageToUserRefund(ctx, client, jid, cancelTemplate)
+	sendMessageToUserRefund(w, client, jid, cancelTemplate)
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Success"})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Success"})
 }
 
-func sendMessageToFieldMaster(ctx *gin.Context, client *whatsmeow.Client, jid types.JID, stringTemplate string) {
+func sendMessageToFieldMaster(w http.ResponseWriter, client *whatsmeow.Client, jid types.JID, stringTemplate string) {
 	if _, err := client.SendMessage(context.Background(), jid, &waProto.Message{
 		Conversation: proto.String(stringTemplate),
 	}); err != nil {
 		fmt.Println("Error sending OTP message:", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"Error": "Failed to send OTP message"})
+		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 }
 
-func sendMessageToUserRefund(ctx *gin.Context, client *whatsmeow.Client, jid types.JID, stringTemplate string) {
+func sendMessageToUserRefund(w http.ResponseWriter, client *whatsmeow.Client, jid types.JID, stringTemplate string) {
 
 	if _, err := client.SendMessage(context.Background(), jid, &waProto.Message{
 		Conversation: proto.String(stringTemplate),
 	}); err != nil {
 		fmt.Println("Error sending OTP message:", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"Error": "Failed to send OTP message"})
+		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 }
