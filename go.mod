@@ -2,8 +2,6 @@ module bola-wa-service
 
 go 1.21
 
-toolchain go1.22.4
-
 require go.mau.fi/whatsmeow v0.0.0-20240625083845-6acab596dd8c
 
 require (
@@ -42,7 +40,6 @@ require (
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.10.9
-	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/ulule/limiter/v3 v3.11.2
 	go.mau.fi/libsignal v0.1.0 // indirect
