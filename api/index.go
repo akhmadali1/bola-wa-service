@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 
 	// _ "github.com/mattn/go-sqlite3"
 	_ "github.com/lib/pq"
@@ -160,12 +161,12 @@ func OpenConnection() *sql.DB {
 	return db
 }
 
-func init() {
-	// err := godotenv.Load()
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	return
-	// }
+func Init() {
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 	flag.Parse()
 	if *debugLogs {
 		logLevel = "DEBUG"
@@ -239,7 +240,7 @@ func init() {
 
 	router := routes.SetupRoutes(client, cronScheduler, reminderMap)
 	app = router
-	// app.Run(":8073")
+	app.Run(":8073")
 
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
@@ -247,7 +248,6 @@ func init() {
 	fmt.Printf("Received signal: %v\n", sig)
 	client.Disconnect()
 	cronScheduler.Stop()
-
 }
 
 func Handler(w http.ResponseWriter, r *http.Request) {
