@@ -14,8 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joho/godotenv"
-
 	_ "github.com/lib/pq"
 	"github.com/robfig/cron/v3"
 	"go.mau.fi/whatsmeow"
@@ -58,11 +56,11 @@ func OpenConnection() *sql.DB {
 }
 
 func init() {
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+	// err := godotenv.Load()
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
 	flag.Parse()
 	if *debugLogs {
 		logLevel = "DEBUG"
