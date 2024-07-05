@@ -32,6 +32,7 @@ var (
 	logLevel       = "INFO"
 	debugLogs      = flag.Bool("debug", false, "Enable debug logs?")
 	pairRejectChan = make(chan bool, 1)
+	httpServer     *http.Server
 )
 
 func OpenConnection() *sql.DB {
@@ -56,7 +57,7 @@ func OpenConnection() *sql.DB {
 	return db
 }
 
-func Init() {
+func init() {
 	err := godotenv.Load()
 	if err != nil {
 		fmt.Println(err)
@@ -135,15 +136,10 @@ func Init() {
 
 	router := routes.SetupRoutes(client, cronScheduler, reminderMap)
 	server := &http.Server{
-		Addr:    ":8073",
 		Handler: router,
 	}
 
-	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Errorf("listen: %s\n", err)
-		}
-	}()
+	httpServer = server
 
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
@@ -157,6 +153,10 @@ func Init() {
 	if err := server.Shutdown(ctx); err != nil {
 		log.Errorf("Server forced to shutdown: %v", err)
 	}
+}
+
+func Handler(w http.ResponseWriter, r *http.Request) {
+	httpServer.Handler.ServeHTTP(w, r)
 }
 
 func EnsureSchema(db *sql.DB) error {
